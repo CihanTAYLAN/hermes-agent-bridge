@@ -1,0 +1,14 @@
+{
+  "algorithm": "HMAC-SHA256",
+  "encoding": "hex",
+  "message_format": "<timestamp>.<raw-body>",
+  "vectors": [
+    {
+      "name": "valid-v2-basic",
+      "secret": "bridge-test-secret-not-production",
+      "timestamp": "1760702400",
+      "raw_body": "{\"schema_version\":1,\"event_type\":\"hermes.agent.message\",\"event_id\":\"018f6b52-4d3a-4f6e-8a12-6d9f4c7b2e10\"}",
+      "expected_signature_v2": "3f2e337001c928aa5f8f5c008c8f9e0bcc5c69e77fffe81f92ae907fb3a17f08"
+    }
+  ]
+}

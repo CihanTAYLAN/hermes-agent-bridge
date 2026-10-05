@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CihanTAYLAN/hermes-agent-bridge/contracts/event.v1.schema.json",
+  "title": "Hermes Agent Message Event v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "event_type",
+    "event_id",
+    "occurred_at",
+    "delivery_semantics",
+    "source",
+    "target",
+    "conversation",
+    "message",
+    "context"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "event_type": { "const": "hermes.agent.message" },
+    "event_id": { "type": "string", "format": "uuid" },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "delivery_semantics": { "const": "generated" },
+    "source": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["agent_id", "instance_id", "platform", "chat_id", "thread_id", "session_id"],
+      "properties": {
+        "agent_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$" },
+        "instance_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$" },
+        "platform": { "enum": ["telegram", "webhook"] },
+        "chat_id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^:]+$" },
+        "thread_id": { "type": ["string", "null"], "maxLength": 64, "pattern": "^[^:]+$" },
+        "session_id": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["agent_id"],
+      "properties": {
+        "agent_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$" }
+      }
+    },
+    "conversation": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["channel_key", "mode", "root_event_id", "causation_id", "hop"],
+      "properties": {
+        "channel_key": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "mode": { "enum": ["observe", "request", "response"] },
+        "root_event_id": { "type": "string", "format": "uuid" },
+        "causation_id": { "type": ["string", "null"], "format": "uuid" },
+        "hop": { "type": "integer", "minimum": 0, "maximum": 2 }
+      }
+    },
+    "message": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["text", "trigger_text", "format"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "trigger_text": { "type": "string", "maxLength": 8192 },
+        "format": { "const": "telegram-markdown" }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["recent_messages"],
+      "properties": {
+        "recent_messages": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["agent_id", "mode", "text", "occurred_at"],
+            "properties": {
+              "agent_id": { "type": "string" },
+              "mode": { "enum": ["observe", "request", "response"] },
+              "text": { "type": "string", "maxLength": 16384 },
+              "occurred_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

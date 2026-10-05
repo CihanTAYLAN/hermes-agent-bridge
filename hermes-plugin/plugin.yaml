@@ -1,0 +1,7 @@
+name: hermes_bridge_outbound
+version: "0.1.0"
+description: "Durable encrypted outbox and signed outbound Hermes Bridge events"
+author: Hermes Bridge contributors
+kind: standalone
+provides_hooks:
+  - post_llm_call

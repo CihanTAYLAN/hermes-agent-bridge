@@ -1,0 +1,22 @@
+{
+  "name": "hermes-agent-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm --filter @hermes-bridge/api build",
+    "lint": "pnpm --filter @hermes-bridge/api lint && pnpm plugin:lint",
+    "typecheck": "pnpm --filter @hermes-bridge/api typecheck && pnpm plugin:typecheck",
+    "test": "pnpm --filter @hermes-bridge/api test && pnpm plugin:test",
+    "test:coverage": "pnpm --filter @hermes-bridge/api test:coverage && pnpm plugin:test:coverage",
+    "test:e2e": "pnpm --filter @hermes-bridge/api test:e2e",
+    "plugin:test": "uv run pytest -W error hermes-plugin/tests -q",
+    "plugin:test:coverage": "uv run pytest -W error hermes-plugin/tests --cov=hermes_bridge_outbound --cov-branch --cov-report=term-missing --cov-fail-under=80",
+    "plugin:lint": "uv run ruff check hermes-plugin",
+    "plugin:typecheck": "uv run mypy",
+    "verify": "bash scripts/verify.sh"
+  }
+}

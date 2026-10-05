@@ -1,0 +1,107 @@
+name: hermes-bridge-local
+
+x-api-environment: &api-environment
+  NODE_ENV: development
+  PORT: "3000"
+  DATABASE_URL: postgresql://bridge:bridge-local-only@postgres:5432/bridge
+  BRIDGE_REQUESTS_ENABLED: "false"
+  BRIDGE_AGENT_ALPHA_ACTIVE_SECRET: local-alpha-api-hmac-secret-change-me
+  BRIDGE_AGENT_ALPHA_PREVIOUS_SECRET: ""
+  BRIDGE_AGENT_BETA_ACTIVE_SECRET: local-beta-api-hmac-secret-change-me
+  BRIDGE_AGENT_BETA_PREVIOUS_SECRET: ""
+  BRIDGE_TO_ALPHA_WEBHOOK_URL: http://mock-alpha:8080/webhooks/peer-beta
+  BRIDGE_TO_ALPHA_WEBHOOK_ACTIVE_SECRET: local-alpha-webhook-secret-change-me
+  BRIDGE_TO_BETA_WEBHOOK_URL: http://mock-beta:8080/webhooks/peer-alpha
+  BRIDGE_TO_BETA_WEBHOOK_ACTIVE_SECRET: local-beta-webhook-secret-change-me
+  BRIDGE_PAYLOAD_KEY_VERSION: v1
+  BRIDGE_PAYLOAD_KEY_V1_BASE64: bG9jYWwtZGV2ZWxvcG1lbnQta2V5LTAwMDAwMDAwMDA=
+  BRIDGE_PAYLOAD_PREVIOUS_KEY_VERSION: ""
+  BRIDGE_PAYLOAD_KEY_V0_BASE64: ""
+  BRIDGE_METRICS_TOKEN: local-metrics-token-change-me
+  BRIDGE_MAX_BODY_BYTES: "65536"
+  BRIDGE_RATE_LIMIT_PER_SECOND: "20"
+  BRIDGE_REPLAY_WINDOW_SECONDS: "300"
+  BRIDGE_WORKER_POLL_INTERVAL_MS: "100"
+  BRIDGE_WORKER_BATCH_SIZE: "10"
+  BRIDGE_WORKER_LEASE_SECONDS: "30"
+  BRIDGE_WORKER_MAX_ATTEMPTS: "6"
+  BRIDGE_WORKER_BASE_DELAY_MS: "100"
+  BRIDGE_WORKER_MAX_DELAY_MS: "5000"
+  BRIDGE_DELIVERY_TIMEOUT_MS: "5000"
+
+x-mock-base: &mock-base
+  build:
+    context: ./test/mock-hermes
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    environment:
+      POSTGRES_DB: bridge
+      POSTGRES_USER: bridge
+      POSTGRES_PASSWORD: bridge-local-only
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - bridge-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bridge -d bridge -h 127.0.0.1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  mock-alpha:
+    <<: *mock-base
+    environment:
+      MOCK_AGENT_ID: alpha
+      MOCK_HERMES_WEBHOOK_SECRET: local-alpha-webhook-secret-change-me
+    ports:
+      - "127.0.0.1:18081:8080"
+
+  mock-beta:
+    <<: *mock-base
+    environment:
+      MOCK_AGENT_ID: beta
+      MOCK_HERMES_WEBHOOK_SECRET: local-beta-webhook-secret-change-me
+    ports:
+      - "127.0.0.1:18082:8080"
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    init: true
+    environment: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-alpha:
+        condition: service_healthy
+      mock-beta:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18080:3000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  bridge-postgres:

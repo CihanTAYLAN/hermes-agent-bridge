@@ -1,0 +1,169 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, "feat/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 22
+
+jobs:
+  detect-components:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.detect.outputs.api }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: detect
+        shell: bash
+        run: |
+          if [[ -f apps/bridge-api/package.json ]]; then
+            echo "api=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "api=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  ops-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: test/mock-hermes/pyproject.toml
+      - name: Test mock Hermes receiver
+        run: |
+          python -m pip install --disable-pip-version-check './test/mock-hermes[test]'
+          python -m pytest -q test/mock-hermes/test_app.py
+      - name: Validate local Compose model
+        run: docker compose -f docker-compose.local.yml config --quiet
+      - name: Validate staging Compose model
+        env:
+          BRIDGE_IMAGE_DIGEST: ghcr.io/example/hermes-bridge@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          BRIDGE_STAGING_HOST: bridge-staging.example.invalid
+          DATABASE_URL: postgresql://bridge:not-a-secret@db.example.invalid:5432/bridge
+          BRIDGE_AGENT_ALPHA_ACTIVE_SECRET: ci-placeholder
+          BRIDGE_AGENT_BETA_ACTIVE_SECRET: ci-placeholder
+          BRIDGE_TO_ALPHA_WEBHOOK_URL: https://alpha.example.invalid/webhooks/peer-beta
+          BRIDGE_TO_ALPHA_WEBHOOK_ACTIVE_SECRET: ci-placeholder
+          BRIDGE_TO_BETA_WEBHOOK_URL: https://beta.example.invalid/webhooks/peer-alpha
+          BRIDGE_TO_BETA_WEBHOOK_ACTIVE_SECRET: ci-placeholder
+          BRIDGE_METRICS_TOKEN: ci-placeholder
+          BRIDGE_PAYLOAD_KEY_VERSION: v1
+          BRIDGE_PAYLOAD_KEY_V1_BASE64: Y2ktb25seS1ub24tc2VjcmV0LWtleS0wMDAwMDAwMDA=
+        run: docker compose -f docker-compose.staging.yml config --quiet
+
+  plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Outbound plugin quality gates
+        run: |
+          uv sync --extra dev --locked
+          uv run ruff check hermes-plugin
+          uv run mypy
+          uv run pytest -W error --cov=hermes_bridge_outbound --cov-branch --cov-report=term-missing hermes-plugin/tests
+
+  api:
+    needs: detect-components
+    if: needs.detect-components.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_DB: bridge_test
+          POSTGRES_USER: bridge
+          POSTGRES_PASSWORD: bridge_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bridge -d bridge_test -h 127.0.0.1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://bridge:bridge_test@127.0.0.1:5432/bridge_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: API quality and PostgreSQL coverage gates
+        run: |
+          pnpm --filter @hermes-bridge/api lint
+          pnpm --filter @hermes-bridge/api typecheck
+          pnpm --filter @hermes-bridge/api test:coverage
+          pnpm --filter @hermes-bridge/api build
+
+  image:
+    needs: [detect-components, api]
+    if: always() && needs.detect-components.outputs.api == 'true' && needs.api.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          load: true
+          push: false
+          tags: hermes-bridge:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Assert image runtime contract
+        shell: bash
+        run: |
+          test "$(docker image inspect hermes-bridge:ci --format '{{.Config.User}}')" = node
+          docker run --rm --entrypoint node hermes-bridge:ci -e \
+            "const fs=require('node:fs'); if(!fs.existsSync('/app/dist/main.js') || !fs.existsSync('/contracts/event.v1.schema.json')) process.exit(1)"
+
+  local-e2e:
+    needs: [detect-components, image]
+    if: always() && needs.detect-components.outputs.api == 'true' && needs.image.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install outbound plugin runtime for producer E2E
+        run: python -m pip install --disable-pip-version-check .
+      - name: Exercise plugin, API, PostgreSQL worker, and both mock receivers
+        shell: bash
+        run: |
+          trap 'docker compose -f docker-compose.local.yml down --volumes --remove-orphans' EXIT
+          docker compose -f docker-compose.local.yml up --build --wait --wait-timeout 180
+          python test/e2e_local.py --timeout 60
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

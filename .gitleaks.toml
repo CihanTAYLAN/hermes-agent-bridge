@@ -1,0 +1,14 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Deterministic local and CI payload-encryption fixtures"
+paths = [
+  '''(^|/)docker-compose\.local\.yml$''',
+  '''(^|/)\.github/workflows/ci\.yml$''',
+]
+regexTarget = "secret"
+regexes = [
+  '''bG9jYWwtZGV2ZWxvcG1lbnQta2V5LTAwMDAwMDAwMDA=''',
+  '''Y2ktb25seS1ub24tc2VjcmV0LWtleS0wMDAwMDAwMDA=''',
+]
