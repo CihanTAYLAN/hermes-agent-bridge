@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import type { AgentConfig } from './config.js';
 import { PayloadCipher, PayloadCipherKeyring } from './crypto/payload-cipher.js';
 import type { DeliveryTarget } from './worker/delivery-worker.js';
@@ -70,6 +71,17 @@ function boolean(env: NodeJS.ProcessEnv, name: string, fallback: boolean): boole
   throw new Error(`Invalid boolean environment variable: ${name}`);
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  return (
+    normalized === 'localhost' ||
+    normalized.endsWith('.localhost') ||
+    (isIP(normalized) === 4 && normalized.startsWith('127.')) ||
+    normalized === '::1' ||
+    normalized === '0:0:0:0:0:0:0:1'
+  );
+}
+
 function httpUrl(env: NodeJS.ProcessEnv, name: string): string {
   const raw = required(env, name);
   let parsed: URL;
@@ -81,9 +93,22 @@ function httpUrl(env: NodeJS.ProcessEnv, name: string): string {
   if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
     throw new Error(`Invalid HTTP URL environment variable: ${name}`);
   }
-  const allowHttp = env.NODE_ENV === 'test' || env.NODE_ENV === 'development';
-  if (parsed.protocol !== 'https:' && !allowHttp) {
-    throw new Error(`HTTPS URL required for environment variable: ${name}`);
+  if (parsed.protocol === 'http:') {
+    const devOnly = env.NODE_ENV === 'development';
+    const loopbackAllowed =
+      boolean(env, 'BRIDGE_ALLOW_INSECURE_LOOPBACK_HTTP', false) &&
+      isLoopbackHostname(parsed.hostname);
+    const localComposeAllowed =
+      boolean(env, 'BRIDGE_ALLOW_INSECURE_LOCAL_COMPOSE_HTTP', false) &&
+      ((name === 'BRIDGE_TO_ALPHA_WEBHOOK_URL' &&
+        parsed.hostname === 'mock-alpha' &&
+        parsed.port === '8080') ||
+        (name === 'BRIDGE_TO_BETA_WEBHOOK_URL' &&
+          parsed.hostname === 'mock-beta' &&
+          parsed.port === '8080'));
+    if (!devOnly || (!loopbackAllowed && !localComposeAllowed)) {
+      throw new Error(`HTTPS URL required for environment variable: ${name}`);
+    }
   }
   return parsed.toString();
 }

@@ -48,6 +48,7 @@ export class DeliveryWorkerRunner {
     }
     this.running = true;
     this.pollFailed = false;
+    this.lastSuccessfulPollAt = undefined;
     this.activePoll = this.poll();
   }
 
