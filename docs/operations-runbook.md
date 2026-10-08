@@ -9,7 +9,7 @@ This runbook covers local validation and an **observe-only staging candidate**. 
 - Metrics: `GET /metrics` with `Authorization: Bearer $BRIDGE_METRICS_TOKEN`.
 - Required data/config: `DATABASE_URL`, `BRIDGE_METRICS_TOKEN`, both agents' ingress HMAC secrets, both private webhook URLs/secrets, and a 32-byte base64 payload key.
 - Safety gate: `BRIDGE_REQUESTS_ENABLED=false` in local and staging Compose rejects both `request` and `response`; only `observe` is accepted. This release rejects `true` at startup until ADR 0002's durable completion receipt protocol exists.
-- TLS gate: delivery targets must be `https://` unless `NODE_ENV` is explicitly `test` or `development`; outbound fetches reject redirects.
+- TLS gate: delivery targets must use `https://`. In `NODE_ENV=development` only, HTTP loopback targets require `BRIDGE_ALLOW_INSECURE_LOOPBACK_HTTP=true`; local Compose's fixed `mock-alpha:8080` and `mock-beta:8080` targets require its separate `BRIDGE_ALLOW_INSECURE_LOCAL_COMPOSE_HTTP=true`. Neither gate permits arbitrary remote HTTP or HTTP in production/test. Outbound fetches reject redirects.
 - The delivery worker is in the API process. Do not scale without validating lease/ordering behavior.
 
 `deploy/Dockerfile` builds the pnpm workspace package, verifies `/app/dist/main.js`, carries the event schema at the path expected by the compiled validator, runs as `node`, and probes readiness. Staging accepts only `BRIDGE_IMAGE_DIGEST=registry/name@sha256:<64 hex>` by policy.
