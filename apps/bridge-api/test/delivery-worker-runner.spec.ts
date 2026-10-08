@@ -105,4 +105,30 @@ describe('DeliveryWorkerRunner', () => {
     expect(runner.isReady()).toBe(false);
     vi.useRealTimers();
   });
+
+  it('requires a fresh successful poll after a stopped runner starts again', async () => {
+    vi.useFakeTimers();
+    const pending = deferred();
+    const runOnce = vi.fn().mockResolvedValueOnce(0).mockReturnValueOnce(pending.promise);
+    const runner = new DeliveryWorkerRunner(
+      { runOnce },
+      { pollIntervalMs: 100, healthTimeoutMs: 300 },
+    );
+
+    try {
+      runner.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(runner.isReady()).toBe(true);
+      await runner.stop();
+      runner.start();
+      expect(runner.isReady()).toBe(false);
+      pending.resolve(0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(runner.isReady()).toBe(true);
+    } finally {
+      pending.resolve(0);
+      await runner.stop();
+      vi.useRealTimers();
+    }
+  });
 });
